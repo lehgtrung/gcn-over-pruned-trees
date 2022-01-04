@@ -69,7 +69,13 @@ parser.add_argument('--cpu', action='store_true', help='Ignore CUDA.')
 parser.add_argument('--load', dest='load', action='store_true', help='Load pretrained model.')
 parser.add_argument('--model_file', type=str, help='Filename of the pretrained model.')
 
+parser.add_argument('--c', type=float, help='C', default=6.5)
+parser.add_argument('--init_pi', type=float, help='Initial Pi', default=0.9)
+parser.add_argument('--dist_type', type=str, help='Equal or Length', default='equal')
+parser.add_argument('--delay', type=int, help='Number of delay epoch', default=0)
+
 args = parser.parse_args()
+
 
 torch.manual_seed(args.seed)
 np.random.seed(args.seed)
@@ -96,8 +102,10 @@ assert emb_matrix.shape[1] == opt['emb_dim']
 
 # load data
 print("Loading data from {} with batch size {}...".format(opt['data_dir'], opt['batch_size']))
-train_batch = DataLoader(opt['data_dir'] + '/train.json', opt['batch_size'], opt, vocab, evaluation=False)
-dev_batch = DataLoader(opt['data_dir'] + '/dev.json', opt['batch_size'], opt, vocab, evaluation=True)
+train_batch = DataLoader(opt['data_dir'] + '/train.json', opt['batch_size'], opt, vocab,
+                         opt['dist_type'], evaluation=False)
+dev_batch = DataLoader(opt['data_dir'] + '/dev.json', opt['batch_size'], opt, vocab,
+                       opt['dist_type'], evaluation=True)
 
 model_id = opt['id'] if len(opt['id']) > 1 else '0' + opt['id']
 model_save_dir = opt['save_dir'] + '/' + model_id
@@ -107,7 +115,8 @@ helper.ensure_dir(model_save_dir, verbose=True)
 # save config
 helper.save_config(opt, model_save_dir + '/config.json', verbose=True)
 vocab.save(model_save_dir + '/vocab.pkl')
-file_logger = helper.FileLogger(model_save_dir + '/' + opt['log'], header="# epoch\ttrain_loss\tdev_loss\tdev_score\tbest_dev_score")
+file_logger = helper.FileLogger(model_save_dir + '/' + opt['log'],
+                                header="# epoch\ttrain_loss\tdev_loss\tdev_score\tbest_dev_score")
 
 # print model info
 helper.print_config(opt)
@@ -117,12 +126,12 @@ if not opt['load']:
     trainer = GCNTrainer(opt, emb_matrix=emb_matrix)
 else:
     # load pretrained model
-    model_file = opt['model_file'] 
+    model_file = opt['model_file']
     print("Loading model from {}".format(model_file))
     model_opt = torch_utils.load_config(model_file)
     model_opt['optim'] = opt['optim']
     trainer = GCNTrainer(model_opt)
-    trainer.load(model_file)   
+    trainer.load(model_file)
 
 id2label = dict([(v,k) for k,v in label2id.items()])
 dev_score_history = []
@@ -130,21 +139,36 @@ current_lr = opt['lr']
 
 global_step = 0
 global_start_time = time.time()
-format_str = '{}: step {}/{} (epoch {}/{}), loss = {:.6f} ({:.3f} sec/batch), lr: {:.6f}'
+format_str = '{}: step {}/{} (epoch {}/{}), loss = {:.6f}, loss_s = {:.6f}, loss_kd = {:.6f}, pi = {:.6f}' \
+             ' ({:.3f} sec/batch), lr: {:.6f}'
+n_train_batches = len(train_batch) * opt['num_epoch']
 max_steps = len(train_batch) * opt['num_epoch']
 
 # start training
+file_logger.log("Params")
+file_logger.log(f"C = {opt['c']}")
+file_logger.log(f"Initial Pi = {opt['init_pi']}")
+file_logger.log(f"Distribution type = {opt['dist_type']}")
+
+
+trainer.set_c(float(opt['c']))
+trainer.set_delay(int(opt['delay']))
+trainer.set_pi(float(opt['init_pi']))
 for epoch in range(1, opt['num_epoch']+1):
     train_loss = 0
+    new_pi = min(1 - float(opt['init_pi']) ** (epoch / opt['num_epoch']), 0.1)
+    trainer.set_pi(new_pi)
     for i, batch in enumerate(train_batch):
         start_time = time.time()
         global_step += 1
-        loss = trainer.update(batch)
+        # print('new_pi: ', new_pi)
+        # trainer.set_pi(new_pi)
+        loss, loss_s, loss_kd, pi = trainer.update(epoch, batch)
         train_loss += loss
         if global_step % opt['log_step'] == 0:
             duration = time.time() - start_time
             print(format_str.format(datetime.now(), global_step, max_steps, epoch,\
-                    opt['num_epoch'], loss, duration, current_lr))
+                    opt['num_epoch'], loss, loss_s, loss_kd, pi, duration, current_lr))
 
     # eval on dev
     print("Evaluating on dev set...")

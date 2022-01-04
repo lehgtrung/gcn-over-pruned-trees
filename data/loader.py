@@ -62,8 +62,10 @@ class DataLoader(object):
             obj_positions = get_positions(d['obj_start'], d['obj_end'], l)
             subj_type = [constant.SUBJ_NER_TO_ID[d['subj_type']]]
             obj_type = [constant.OBJ_NER_TO_ID[d['obj_type']]]
+            dist = d.get('dist_length', [])
             relation = self.label2id[d['relation']]
-            processed += [(tokens, pos, ner, deprel, head, subj_positions, obj_positions, subj_type, obj_type, relation)]
+            processed += [(tokens, pos, ner, deprel, head, subj_positions, obj_positions,
+                           subj_type, obj_type, dist, relation)]
         return processed
 
     def gold(self):
@@ -82,7 +84,7 @@ class DataLoader(object):
         batch = self.data[key]
         batch_size = len(batch)
         batch = list(zip(*batch))
-        assert len(batch) == 10
+        assert len(batch) == 11
 
         # sort all fields by lens for easy RNN operations
         lens = [len(x) for x in batch[0]]
@@ -106,9 +108,11 @@ class DataLoader(object):
         subj_type = get_long_tensor(batch[7], batch_size)
         obj_type = get_long_tensor(batch[8], batch_size)
 
-        rels = torch.LongTensor(batch[9])
+        rels = torch.LongTensor(batch[10])
+        dist = torch.FloatTensor(batch[9])
 
-        return (words, masks, pos, ner, deprel, head, subj_positions, obj_positions, subj_type, obj_type, rels, orig_idx)
+        return (words, masks, pos, ner, deprel, head, subj_positions,
+                obj_positions, subj_type, obj_type, dist, rels, orig_idx)
 
     def __iter__(self):
         for i in range(self.__len__()):

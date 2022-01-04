@@ -10,6 +10,9 @@ from data.loader import DataLoader
 from model.trainer import GCNTrainer
 from utils import torch_utils, scorer, constant, helper
 from utils.vocab import Vocab
+import matplotlib.pyplot as plt
+import numpy as np
+from sklearn.metrics import confusion_matrix
 
 parser = argparse.ArgumentParser()
 parser.add_argument('model_dir', type=str, help='Directory of the model.')
@@ -61,6 +64,23 @@ for i, b in enumerate(batch_iter):
 predictions = [id2label[p] for p in predictions]
 p, r, f1 = scorer.score(batch.gold(), predictions, verbose=True)
 print("{} set evaluate result: {:.2f}\t{:.2f}\t{:.2f}".format(args.dataset,p,r,f1))
+
+target_names = []
+with open(args.model_dir + '/predictions.txt', 'w') as f:
+    for p, g in zip(predictions, batch.gold()):
+        f.write(f'{p},{g}\n')
+        if g not in target_names:
+            target_names.append(g)
+
+target_names = list(target_names)
+confmat = confusion_matrix(batch.gold(), predictions, normalize='pred', labels=target_names)
+ticks = np.linspace(0, 41, num=42)
+plt.imshow(confmat, interpolation='none')
+plt.colorbar()
+plt.xticks(ticks, labels=target_names, fontsize=6, rotation=90)
+plt.yticks(ticks, labels=target_names, fontsize=6)
+plt.grid(True)
+plt.show()
 
 print("Evaluation ended.")
 
